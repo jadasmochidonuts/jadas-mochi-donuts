@@ -8,11 +8,29 @@ const DELIVERY_FEE_CENTS = 600;
 const SITE_URL = "https://www.jadasmochidonuts.com";
 
 module.exports = async (req, res) => {
-  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-
   const token = process.env.SQUARE_ACCESS_TOKEN;
   const locationId = process.env.SQUARE_LOCATION_ID;
   const isProd = process.env.SQUARE_ENV === "production";
+  const base = `https://connect.${isProd ? "squareup" : "squareupsandbox"}.com`;
+  const headers = { "Square-Version": "2024-10-17", Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+
+  // GET ?check=<square order id> → has this order been paid? (used after the customer returns from Square)
+  if (req.method === "GET" && req.query && req.query.check) {
+    const id = String(req.query.check);
+    if (!token || !/^[A-Za-z0-9_-]{5,64}$/.test(id)) return res.status(400).json({ paid: false });
+    try {
+      const r = await fetch(`${base}/v2/orders/${id}`, { headers });
+      const data = await r.json();
+      const o = data.order || {};
+      const paid = o.location_id === locationId && (o.state === "COMPLETED" || (Array.isArray(o.tenders) && o.tenders.length > 0));
+      return res.status(200).json({ paid });
+    } catch (err) {
+      console.error(err);
+      return res.status(200).json({ paid: false });
+    }
+  }
+
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   if (!token || !locationId) return res.status(500).json({ error: "Square is not configured yet" });
 
   let body = req.body;
@@ -45,9 +63,9 @@ module.exports = async (req, res) => {
   if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) payload.pre_populated_data = { buyer_email: email };
 
   try {
-    const r = await fetch(`https://connect.${isProd ? "squareup" : "squareupsandbox"}.com/v2/online-checkout/payment-links`, {
+    const r = await fetch(`${base}/v2/online-checkout/payment-links`, {
       method: "POST",
-      headers: { "Square-Version": "2024-10-17", Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
     const data = await r.json();
@@ -55,7 +73,7 @@ module.exports = async (req, res) => {
       console.error("Square error:", JSON.stringify(data.errors || data));
       return res.status(502).json({ error: "Could not start card checkout" });
     }
-    return res.status(200).json({ url: data.payment_link.url });
+    return res.status(200).json({ url: data.payment_link.url, squareOrderId: data.payment_link.order_id });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "Could not reach Square" });
