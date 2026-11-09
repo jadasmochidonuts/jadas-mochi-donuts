@@ -37,7 +37,10 @@ module.exports = async (req, res) => {
   const payload = {
     idempotency_key: `${ref}-${Math.random().toString(36).slice(2, 10)}`,
     order: { location_id: locationId, reference_id: ref, line_items: lineItems },
-    checkout_options: { redirect_url: `${SITE_URL}/?paid=1&order=${ref}` },
+    checkout_options: {
+      redirect_url: `${SITE_URL}/?paid=1&order=${ref}`,
+      accepted_payment_methods: { apple_pay: true, google_pay: true },
+    },
   };
   if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) payload.pre_populated_data = { buyer_email: email };
 
